@@ -1,0 +1,32 @@
+{
+  "name": "recipe-collection",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "sheets:check": "tsx --env-file=.env.local scripts/check-google-sheets.ts",
+    "sheets:seed": "tsx --env-file=.env.local scripts/seed-google-sheets.ts",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "googleapis": "^173.0.0",
+    "lucide-react": "^1.23.0",
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "babel-plugin-react-compiler": "1.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.0",
+    "typescript": "^5"
+  }
+}
