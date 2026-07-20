@@ -115,6 +115,13 @@ For a simple private deployment, add:
 
 If those two values are blank, the app does not require a password.
 
+For pasted recipe parsing, add:
+
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+
+`GEMINI_MODEL` defaults to `gemini-3.1-flash-lite` if it is not set.
+
 ## Security Notes
 
 - Do not commit `.env.local`.

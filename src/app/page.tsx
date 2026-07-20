@@ -56,6 +56,17 @@ type CookMode = "focus" | "overview";
 type ViewFilter = "all" | "todo" | "done" | "staged";
 type SortMode = "recent" | "time" | "effort" | "rating";
 type CloudinaryUploadPurpose = "cooked" | "source";
+type ParsedRecipe = Pick<
+  Recipe,
+  | "effort"
+  | "estimatedMinutes"
+  | "ingredients"
+  | "mealType"
+  | "notes"
+  | "steps"
+  | "tags"
+  | "title"
+>;
 
 type CookTimer = {
   id: string;
@@ -1079,6 +1090,10 @@ function AddScreen({
 }) {
   const [isUploadingSource, setIsUploadingSource] = useState(false);
   const [sourceUploadError, setSourceUploadError] = useState<string | null>(null);
+  const [pasteText, setPasteText] = useState("");
+  const [parsedRecipe, setParsedRecipe] = useState<ParsedRecipe | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [isParsing, setIsParsing] = useState(false);
 
   function updateDraft(updates: Partial<Recipe>) {
     onDraftChange({
@@ -1108,6 +1123,37 @@ function AddScreen({
     }
   }
 
+  async function processPastedRecipe() {
+    setIsParsing(true);
+    setParseError(null);
+
+    try {
+      const response = await fetch("/api/recipes/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceText: pasteText }),
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        recipe?: ParsedRecipe;
+      };
+
+      if (!response.ok || !data.recipe) {
+        throw new Error(data.error ?? "Unable to parse recipe.");
+      }
+
+      const parsed = normalizeParsedRecipe(data.recipe);
+      setParsedRecipe(parsed);
+      updateDraft(parsed);
+    } catch (error) {
+      setParseError(
+        error instanceof Error ? error.message : "Unable to parse recipe.",
+      );
+    } finally {
+      setIsParsing(false);
+    }
+  }
+
   const canSave =
     draftRecipe.title.trim().length > 0 &&
     draftRecipe.ingredients.some((item) => item.trim()) &&
@@ -1123,6 +1169,38 @@ function AddScreen({
         }
       }}
     >
+      <section className="grid gap-5 lg:col-span-2 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <div className="panel-surface grid gap-4 rounded-lg p-5">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-[0.16em] text-emerald-700">
+              Gemini parser
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold">Paste Recipe Text</h2>
+          </div>
+          <textarea
+            className="min-h-72 rounded-lg border border-slate-200 bg-white p-4 text-sm font-medium leading-6 text-slate-800 outline-none placeholder:text-slate-400"
+            placeholder="Paste a recipe from a website, note, PDF, or cookbook transcription..."
+            value={pasteText}
+            onChange={(event) => setPasteText(event.target.value)}
+          />
+          {parseError ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+              {parseError}
+            </p>
+          ) : null}
+          <button
+            className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            type="button"
+            disabled={isParsing || !pasteText.trim()}
+            onClick={processPastedRecipe}
+          >
+            {isParsing ? "Processing..." : "Process Recipe"}
+          </button>
+        </div>
+
+        <ParsedRecipePreview recipe={parsedRecipe} />
+      </section>
+
       <section className="panel-surface grid content-start gap-5 rounded-lg p-5">
         <button
           className="flex h-10 w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
@@ -2231,6 +2309,94 @@ function TextAreaField({
 
 function linesToDraftList(value: string) {
   return value.split("\n");
+}
+
+function normalizeParsedRecipe(recipe: ParsedRecipe): ParsedRecipe {
+  return {
+    title: recipe.title ?? "",
+    mealType: recipe.mealType ?? "Dinner",
+    estimatedMinutes: Number.isFinite(Number(recipe.estimatedMinutes))
+      ? Number(recipe.estimatedMinutes)
+      : 0,
+    effort: recipe.effort ?? "Medium",
+    tags: recipe.tags ?? [],
+    ingredients: recipe.ingredients ?? [],
+    steps: recipe.steps ?? [],
+    notes: recipe.notes ?? "",
+  };
+}
+
+function ParsedRecipePreview({ recipe }: { recipe: ParsedRecipe | null }) {
+  if (!recipe) {
+    return (
+      <section className="panel-surface rounded-lg p-5">
+        <h2 className="text-2xl font-semibold">Parsed Preview</h2>
+        <div className="mt-4 flex min-h-72 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 p-6 text-center text-sm font-semibold text-slate-400">
+          Parsed ingredients and step-by-step instructions will appear here.
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="panel-surface rounded-lg p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-semibold">{recipe.title}</h2>
+          <RecipeMeta
+            recipe={{
+              ...createEmptyRecipe(),
+              ...recipe,
+              status: "todo",
+              staged: false,
+              cookedImageUrls: [],
+              createdAt: "",
+              updatedAt: "",
+            }}
+            className="mt-3 text-slate-500"
+          />
+        </div>
+        <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase text-emerald-700">
+          Applied to draft
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        <div>
+          <h3 className="text-sm font-bold uppercase text-slate-500">
+            Ingredients
+          </h3>
+          <ul className="mt-3 grid gap-2">
+            {recipe.ingredients.map((ingredient) => (
+              <li
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                key={ingredient}
+              >
+                {ingredient}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <h3 className="text-sm font-bold uppercase text-slate-500">Steps</h3>
+          <ol className="mt-3 grid gap-2">
+            {recipe.steps.map((step, index) => (
+              <li
+                className="grid grid-cols-[32px_minmax(0,1fr)] gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                key={`${step}-${index}`}
+              >
+                <span className="flex size-8 items-center justify-center rounded-full bg-slate-950 text-xs font-bold text-white">
+                  {index + 1}
+                </span>
+                <span className="leading-6">{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function RecipeMeta({

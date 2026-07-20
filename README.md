@@ -10,11 +10,12 @@ A personal recipe web app for keeping recipes to cook later, staging recipes for
 - Cook view with ingredient check-off, step-by-step instructions, source links, ratings, and staged/done toggles.
 - Google Sheets-backed recipe loading and saving through server-side API routes.
 - Cloudinary signed-upload plumbing for cooked dish photos and recipe source/reference images.
+- Gemini-powered pasted recipe parsing into editable app fields.
 - Optional Basic Auth gate for private deployments.
 
 ## Planned Integrations
 
-- LLM-assisted imports for recipe URLs, pasted recipe text, and cookbook photos.
+- Recipe URL imports and cookbook photo OCR.
 
 ## Local Development
 
@@ -51,7 +52,12 @@ Optional for a private deployment:
 - `APP_USERNAME`
 - `APP_PASSWORD`
 
+Required for pasted recipe parsing:
+
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+
 ## Next Build Steps
 
-1. Add URL/text/photo recipe import routes.
+1. Add recipe URL and cookbook photo import routes.
 2. Improve timer resilience for phone sleep/lock behavior.
