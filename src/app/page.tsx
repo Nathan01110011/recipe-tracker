@@ -21,6 +21,7 @@ import {
   Sparkles,
   Star,
   Timer,
+  Trash2,
   Utensils,
   X,
 } from "lucide-react";
@@ -249,6 +250,56 @@ export default function Home() {
     }
   }
 
+  function deleteRecipe(id: string) {
+    const recipeToDelete = recipes.find((recipe) => recipe.id === id);
+
+    if (!recipeToDelete) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete "${recipeToDelete.title}"? This removes it from Google Sheets.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const nextRecipes = recipes.filter((recipe) => recipe.id !== id);
+    setRecipes(nextRecipes);
+    setActiveRecipeId(nextRecipes[0]?.id ?? initialRecipes[0].id);
+    if (appView === "cook" && nextRecipes.length === 0) {
+      setAppView("home");
+    }
+
+    void deletePersistedRecipe(id, recipeToDelete);
+  }
+
+  async function deletePersistedRecipe(id: string, deletedRecipe: Recipe) {
+    try {
+      const response = await fetch(`/api/recipes?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as { error?: string; ok?: boolean };
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Unable to delete recipe.");
+      }
+
+      setSyncMessage(null);
+    } catch (error) {
+      setRecipes((currentRecipes) =>
+        currentRecipes.some((recipe) => recipe.id === deletedRecipe.id)
+          ? currentRecipes
+          : [deletedRecipe, ...currentRecipes],
+      );
+      setActiveRecipeId(deletedRecipe.id);
+      setSyncMessage(
+        error instanceof Error ? error.message : "Recipe was not deleted.",
+      );
+    }
+  }
+
   async function persistRecipe(recipe: Recipe) {
     try {
       const response = await fetch("/api/recipes", {
@@ -438,6 +489,7 @@ export default function Home() {
             onSortModeChange={setSortMode}
             onViewChange={setView}
             onCook={() => setAppView("cook")}
+            onDeleteRecipe={deleteRecipe}
             onUpdateRecipe={updateRecipe}
           />
         ) : null}
@@ -463,6 +515,7 @@ export default function Home() {
             onToggleStep={toggleStep}
             onToggleTimer={toggleTimer}
             onToggleTimerPinned={toggleTimerPinned}
+            onDeleteRecipe={deleteRecipe}
             onUpdateRecipe={updateRecipe}
           />
         ) : null}
@@ -679,6 +732,7 @@ function LibraryScreen({
   sortMode,
   view,
   onCook,
+  onDeleteRecipe,
   onMealTypeChange,
   onOpenRecipe,
   onQueryChange,
@@ -693,6 +747,7 @@ function LibraryScreen({
   sortMode: SortMode;
   view: ViewFilter;
   onCook: () => void;
+  onDeleteRecipe: (recipeId: string) => void;
   onMealTypeChange: (value: "All" | MealType) => void;
   onOpenRecipe: (recipeId: string) => void;
   onQueryChange: (value: string) => void;
@@ -760,6 +815,7 @@ function LibraryScreen({
       <RecipeOverview
         recipe={activeRecipe}
         onCook={onCook}
+        onDeleteRecipe={() => onDeleteRecipe(activeRecipe.id)}
         onUpdateRecipe={onUpdateRecipe}
       />
     </section>
@@ -784,6 +840,7 @@ function CookScreen({
   onToggleStep,
   onToggleTimer,
   onToggleTimerPinned,
+  onDeleteRecipe,
   onUpdateRecipe,
 }: {
   activeRecipe: Recipe;
@@ -807,6 +864,7 @@ function CookScreen({
   onToggleStep: (recipeId: string, stepIndex: number) => void;
   onToggleTimer: (timerId: string) => void;
   onToggleTimerPinned: (timerId: string) => void;
+  onDeleteRecipe: (recipeId: string) => void;
   onUpdateRecipe: (id: string, updates: Partial<Recipe>) => void;
 }) {
   const totalSteps = activeRecipe.steps.length;
@@ -915,6 +973,7 @@ function CookScreen({
               <CookControls
                 compact
                 recipe={activeRecipe}
+                onDeleteRecipe={() => onDeleteRecipe(activeRecipe.id)}
                 onUpdateRecipe={onUpdateRecipe}
               />
             </div>
@@ -1416,10 +1475,12 @@ function StepTimers({
 function RecipeOverview({
   recipe,
   onCook,
+  onDeleteRecipe,
   onUpdateRecipe,
 }: {
   recipe: Recipe;
   onCook: () => void;
+  onDeleteRecipe: () => void;
   onUpdateRecipe: (id: string, updates: Partial<Recipe>) => void;
 }) {
   return (
@@ -1458,7 +1519,12 @@ function RecipeOverview({
             <Utensils className="size-4" aria-hidden="true" />
             Cook
           </button>
-          <CookControls recipe={recipe} onUpdateRecipe={onUpdateRecipe} compact />
+          <CookControls
+            compact
+            recipe={recipe}
+            onDeleteRecipe={onDeleteRecipe}
+            onUpdateRecipe={onUpdateRecipe}
+          />
         </section>
       </div>
     </article>
@@ -1637,10 +1703,12 @@ function getRecipeDisplayImage(recipe: Recipe) {
 
 function CookControls({
   compact = false,
+  onDeleteRecipe,
   recipe,
   onUpdateRecipe,
 }: {
   compact?: boolean;
+  onDeleteRecipe?: () => void;
   recipe: Recipe;
   onUpdateRecipe: (id: string, updates: Partial<Recipe>) => void;
 }) {
@@ -1707,6 +1775,16 @@ function CookControls({
           <ExternalLink className="size-4" aria-hidden="true" />
           Source
         </a>
+      ) : null}
+      {onDeleteRecipe ? (
+        <button
+          className="flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-100"
+          type="button"
+          onClick={onDeleteRecipe}
+        >
+          <Trash2 className="size-4" aria-hidden="true" />
+          Delete Recipe
+        </button>
       ) : null}
     </div>
   );

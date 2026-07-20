@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { basicAuthHeaders, isAuthorized } from "@/lib/basic-auth";
-import { listRecipes, upsertRecipe } from "@/lib/google-sheets";
+import { deleteRecipe, listRecipes, upsertRecipe } from "@/lib/google-sheets";
 import type { RecipeRecord } from "@/lib/recipe-schema";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +29,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ recipe });
   } catch (error) {
     return recipeApiError(error, "Unable to save recipe.");
+  }
+}
+
+export async function DELETE(request: Request) {
+  const unauthorized = requireAuth(request.headers);
+  if (unauthorized) return unauthorized;
+
+  try {
+    const recipeId = new URL(request.url).searchParams.get("id");
+
+    if (!recipeId) {
+      throw new Error("Recipe id is required.");
+    }
+
+    await deleteRecipe(recipeId);
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return recipeApiError(error, "Unable to delete recipe.");
   }
 }
 

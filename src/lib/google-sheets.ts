@@ -66,6 +66,33 @@ export async function upsertRecipe(recipe: RecipeRecord) {
   await appendRecipe(recipe);
 }
 
+export async function deleteRecipe(recipeId: string) {
+  const rowNumber = await findRecipeRowNumber(recipeId);
+
+  if (!rowNumber) {
+    throw new Error(`Recipe ${recipeId} was not found in Google Sheets.`);
+  }
+
+  const sheets = getSheetsClient();
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: getSpreadsheetId(),
+    requestBody: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId: await getRecipeSheetId(),
+              dimension: "ROWS",
+              startIndex: rowNumber - 1,
+              endIndex: rowNumber,
+            },
+          },
+        },
+      ],
+    },
+  });
+}
+
 export async function syncRecipeSheetHeader() {
   const sheets = getSheetsClient();
 
@@ -91,6 +118,25 @@ async function findRecipeRowNumber(recipeId: string) {
   );
 
   return rowIndex === -1 ? null : rowIndex + 2;
+}
+
+async function getRecipeSheetId() {
+  const sheets = getSheetsClient();
+  const response = await sheets.spreadsheets.get({
+    spreadsheetId: getSpreadsheetId(),
+    fields: "sheets.properties",
+  });
+
+  const sheet = response.data.sheets?.find(
+    (item) => item.properties?.title === sheetName,
+  );
+  const sheetId = sheet?.properties?.sheetId;
+
+  if (sheetId === undefined || sheetId === null) {
+    throw new Error(`Sheet tab ${sheetName} was not found.`);
+  }
+
+  return sheetId;
 }
 
 function getSheetsClient() {
