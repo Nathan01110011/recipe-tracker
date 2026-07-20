@@ -9,7 +9,7 @@ A personal recipe web app for keeping recipes to cook later, staging recipes for
 - Separate `status` and `staged` fields so recipes can be done or to-do while still being planned for cooking soon.
 - Cook view with ingredient check-off, step-by-step instructions, source links, ratings, and staged/done toggles.
 - Google Sheets-backed recipe loading and saving through server-side API routes.
-- Cloudinary signed-upload plumbing for cooked dish photos.
+- Cloudinary signed-upload plumbing for cooked dish photos and recipe source/reference images.
 - Optional Basic Auth gate for private deployments.
 
 ## Planned Integrations
@@ -37,12 +37,14 @@ Required for live recipe storage:
 - `GOOGLE_SHEETS_CLIENT_EMAIL`
 - `GOOGLE_SHEETS_PRIVATE_KEY`
 
-Required for cooked photo uploads:
+Required for image uploads:
 
 - `CLOUDINARY_CLOUD_NAME`
 - `CLOUDINARY_API_KEY`
 - `CLOUDINARY_API_SECRET`
 - `CLOUDINARY_UPLOAD_FOLDER`
+- `CLOUDINARY_COOKED_UPLOAD_FOLDER`
+- `CLOUDINARY_SOURCE_UPLOAD_FOLDER`
 
 Optional for a private deployment:
 
@@ -51,6 +53,5 @@ Optional for a private deployment:
 
 ## Next Build Steps
 
-1. Replace the placeholder add screen with a real editable recipe form.
-2. Add URL/text/photo recipe import routes.
-3. Improve timer resilience for phone sleep/lock behavior.
+1. Add URL/text/photo recipe import routes.
+2. Improve timer resilience for phone sleep/lock behavior.

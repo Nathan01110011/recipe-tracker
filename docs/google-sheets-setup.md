@@ -103,8 +103,10 @@ For cooked photo uploads, add:
 - `CLOUDINARY_API_KEY`
 - `CLOUDINARY_API_SECRET`
 - `CLOUDINARY_UPLOAD_FOLDER`
+- `CLOUDINARY_COOKED_UPLOAD_FOLDER`
+- `CLOUDINARY_SOURCE_UPLOAD_FOLDER`
 
-`CLOUDINARY_UPLOAD_FOLDER` can be `recipe-tracker/cooked`. Cloudinary folders are created by upload path, so you do not need to pre-create the folder.
+`CLOUDINARY_COOKED_UPLOAD_FOLDER` can be `recipe-tracker/cooked`, and `CLOUDINARY_SOURCE_UPLOAD_FOLDER` can be `recipe-tracker/source`. `CLOUDINARY_UPLOAD_FOLDER` is still supported as the older cooked-photo fallback. Cloudinary folders are created by upload path, so you do not need to pre-create either folder.
 
 For a simple private deployment, add:
 

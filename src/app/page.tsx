@@ -18,7 +18,6 @@ import {
   Play,
   Plus,
   Search,
-  Sparkles,
   Star,
   Timer,
   Trash2,
@@ -56,6 +55,7 @@ type AppView = "home" | "library" | "cook" | "add";
 type CookMode = "focus" | "overview";
 type ViewFilter = "all" | "todo" | "done" | "staged";
 type SortMode = "recent" | "time" | "effort" | "rating";
+type CloudinaryUploadPurpose = "cooked" | "source";
 
 type CookTimer = {
   id: string;
@@ -76,6 +76,27 @@ const effortScore: Record<Effort, number> = {
 
 const initialRecipes: Recipe[] = sampleRecipes.map(recipeRecordToRecipe);
 
+function createEmptyRecipe(): Recipe {
+  const now = new Date().toISOString();
+
+  return {
+    id: `recipe-${Date.now()}`,
+    title: "",
+    status: "todo",
+    staged: false,
+    cookedImageUrls: [],
+    mealType: "Dinner",
+    estimatedMinutes: 30,
+    effort: "Medium",
+    tags: [],
+    ingredients: [""],
+    steps: [""],
+    notes: "",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function recipeRecordToRecipe(recipe: RecipeRecord): Recipe {
   return {
     ...recipe,
@@ -91,6 +112,20 @@ function recipeToRecord(recipe: Recipe): RecipeRecord {
   return {
     ...recipe,
     notes: recipe.notes || undefined,
+  };
+}
+
+function normalizeRecipeForSave(recipe: Recipe): Recipe {
+  return {
+    ...recipe,
+    title: recipe.title.trim() || "Untitled Recipe",
+    sourceUrl: recipe.sourceUrl?.trim() || undefined,
+    sourceImageUrl: recipe.sourceImageUrl?.trim() || undefined,
+    tags: recipe.tags.map((item) => item.trim()).filter(Boolean),
+    ingredients: recipe.ingredients.map((item) => item.trim()).filter(Boolean),
+    steps: recipe.steps.map((item) => item.trim()).filter(Boolean),
+    notes: recipe.notes.trim(),
+    estimatedMinutes: Math.max(0, Math.round(recipe.estimatedMinutes || 0)),
   };
 }
 
@@ -120,6 +155,7 @@ export default function Home() {
   const [timers, setTimers] = useState<CookTimer[]>([]);
   const [isLoadingRecipes, setIsLoadingRecipes] = useState(true);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [draftRecipe, setDraftRecipe] = useState<Recipe | null>(null);
 
   const stagedRecipes = recipes.filter((recipe) => recipe.staged);
   const doneRecipes = recipes.filter((recipe) => recipe.status === "done");
@@ -405,29 +441,26 @@ export default function Home() {
     );
   }
 
-  function addStarterRecipe() {
-    const now = new Date().toISOString();
-    const newRecipe: Recipe = {
-      id: `new-recipe-${Date.now()}`,
-      title: "Untitled Recipe",
-      status: "todo",
-      staged: false,
-      sourceImageUrl:
-        "https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=1200&q=80",
-      cookedImageUrls: [],
-      mealType: "Dinner",
-      estimatedMinutes: 30,
-      effort: "Medium",
-      tags: ["draft"],
-      ingredients: ["Add ingredients here"],
-      steps: ["Add the cooking steps here"],
-      notes: "Draft recipe ready to connect to the full editor.",
-      createdAt: now,
-      updatedAt: now,
-    };
-    setRecipes((currentRecipes) => [newRecipe, ...currentRecipes]);
+  function startRecipeDraft() {
+    const newRecipe = createEmptyRecipe();
+    setDraftRecipe(newRecipe);
     setActiveRecipeId(newRecipe.id);
     setAppView("add");
+  }
+
+  function saveRecipeDraft(recipe: Recipe) {
+    const now = new Date().toISOString();
+    const newRecipe = normalizeRecipeForSave({
+      ...recipe,
+      createdAt: recipe.createdAt || now,
+      updatedAt: now,
+    });
+
+    setRecipes((currentRecipes) => [newRecipe, ...currentRecipes]);
+    setActiveRecipeId(newRecipe.id);
+    setDraftRecipe(null);
+    setView("all");
+    setAppView("library");
     void persistRecipe(newRecipe);
   }
 
@@ -437,7 +470,7 @@ export default function Home() {
         <AppHeader
           appView={appView}
           isLoadingRecipes={isLoadingRecipes}
-          onAdd={addStarterRecipe}
+          onAdd={startRecipeDraft}
           onHome={() => setAppView("home")}
           onLibrary={() => setAppView("library")}
         />
@@ -453,7 +486,7 @@ export default function Home() {
             doneRecipes={doneRecipes}
             recipes={recipes}
             stagedRecipes={stagedRecipes}
-            onAdd={addStarterRecipe}
+            onAdd={startRecipeDraft}
             onDone={() => {
               setView("done");
               setAppView("library");
@@ -522,9 +555,17 @@ export default function Home() {
 
         {appView === "add" ? (
           <AddScreen
-            activeRecipe={activeRecipe}
-            onBack={() => setAppView("home")}
-            onLibrary={() => setAppView("library")}
+            draftRecipe={draftRecipe ?? createEmptyRecipe()}
+            onBack={() => {
+              setDraftRecipe(null);
+              setAppView("home");
+            }}
+            onCancel={() => {
+              setDraftRecipe(null);
+              setAppView("library");
+            }}
+            onDraftChange={setDraftRecipe}
+            onSave={saveRecipeDraft}
           />
         ) : null}
       </div>
@@ -1024,57 +1065,246 @@ function CookScreen({
 }
 
 function AddScreen({
-  activeRecipe,
   onBack,
-  onLibrary,
+  onCancel,
+  onDraftChange,
+  onSave,
+  draftRecipe,
 }: {
-  activeRecipe: Recipe;
+  draftRecipe: Recipe;
   onBack: () => void;
-  onLibrary: () => void;
+  onCancel: () => void;
+  onDraftChange: (recipe: Recipe) => void;
+  onSave: (recipe: Recipe) => void;
 }) {
+  const [isUploadingSource, setIsUploadingSource] = useState(false);
+  const [sourceUploadError, setSourceUploadError] = useState<string | null>(null);
+
+  function updateDraft(updates: Partial<Recipe>) {
+    onDraftChange({
+      ...draftRecipe,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async function uploadSourceImage(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    setIsUploadingSource(true);
+    setSourceUploadError(null);
+
+    try {
+      const imageUrl = await uploadCloudinaryImage(file, "source");
+      updateDraft({ sourceImageUrl: imageUrl });
+    } catch (error) {
+      setSourceUploadError(
+        error instanceof Error ? error.message : "Unable to upload image.",
+      );
+    } finally {
+      setIsUploadingSource(false);
+    }
+  }
+
+  const canSave =
+    draftRecipe.title.trim().length > 0 &&
+    draftRecipe.ingredients.some((item) => item.trim()) &&
+    draftRecipe.steps.some((item) => item.trim());
+
   return (
-    <section className="grid flex-1 content-start gap-5 py-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <form
+      className="grid flex-1 content-start gap-5 py-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (canSave) {
+          onSave(draftRecipe);
+        }
+      }}
+    >
+      <section className="panel-surface grid content-start gap-5 rounded-lg p-5">
         <button
-          className="mb-5 flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700"
+          className="flex h-10 w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
           type="button"
           onClick={onBack}
         >
           <ArrowLeft className="size-4" aria-hidden="true" />
           Home
         </button>
-        <h1 className="text-3xl font-semibold">Add Recipe</h1>
-        <div className="mt-6 grid gap-3">
-          <ImportButton icon={<ExternalLink className="size-4" aria-hidden="true" />} label="Recipe URL" />
-          <ImportButton icon={<BookOpen className="size-4" aria-hidden="true" />} label="Paste Text" />
-          <ImportButton icon={<ImagePlus className="size-4" aria-hidden="true" />} label="Cookbook Photo" />
-          <ImportButton icon={<Sparkles className="size-4" aria-hidden="true" />} label="Manual Entry" />
-        </div>
-      </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-semibold">Draft</h2>
-        <div className="mt-4 grid gap-4">
-          <input
-            className="h-12 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none"
-            readOnly
-            value={activeRecipe.title}
+        <div>
+          <p className="text-sm font-bold uppercase tracking-[0.16em] text-emerald-700">
+            Manual entry
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold">Add Recipe</h1>
+        </div>
+
+        <div className="grid gap-4">
+          <TextField
+            label="Title"
+            placeholder="Miso salmon rice bowls"
+            value={draftRecipe.title}
+            onChange={(value) => updateDraft({ title: value })}
           />
-          <textarea
-            className="min-h-36 rounded-lg border border-slate-200 p-3 text-sm leading-6 outline-none"
-            readOnly
-            value={activeRecipe.notes}
+
+          <TextField
+            label="Source URL"
+            placeholder="https://..."
+            value={draftRecipe.sourceUrl ?? ""}
+            onChange={(value) => updateDraft({ sourceUrl: value })}
           />
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <SelectField
+              label="Meal"
+              value={draftRecipe.mealType}
+              onChange={(value) => updateDraft({ mealType: value as MealType })}
+            >
+              {["Breakfast", "Lunch", "Dinner", "Snack", "Dessert"].map((option) => (
+                <option key={option}>{option}</option>
+              ))}
+            </SelectField>
+            <SelectField
+              label="Effort"
+              value={draftRecipe.effort}
+              onChange={(value) => updateDraft({ effort: value as Effort })}
+            >
+              {["Low", "Medium", "High"].map((option) => (
+                <option key={option}>{option}</option>
+              ))}
+            </SelectField>
+            <NumberField
+              label="Minutes"
+              value={draftRecipe.estimatedMinutes}
+              onChange={(value) => updateDraft({ estimatedMinutes: value })}
+            />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SelectField
+              label="Status"
+              value={draftRecipe.status}
+              onChange={(value) => updateDraft({ status: value as RecipeStatus })}
+            >
+              <option value="todo">To Do</option>
+              <option value="done">Done</option>
+            </SelectField>
+            <label className="flex min-h-16 items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
+              <input
+                className="size-4 accent-blue-600"
+                type="checkbox"
+                checked={draftRecipe.staged}
+                onChange={(event) => updateDraft({ staged: event.target.checked })}
+              />
+              Stage for cooking soon
+            </label>
+          </div>
+
+          <TextAreaField
+            label="Notes"
+            placeholder="What makes this worth saving?"
+            value={draftRecipe.notes}
+            onChange={(value) => updateDraft({ notes: value })}
+          />
+        </div>
+      </section>
+
+      <section className="grid content-start gap-5">
+        <div className="panel-surface rounded-lg p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold">Source Image</h2>
+              <p className="mt-1 text-sm font-medium text-slate-500">
+                Recipe website, cookbook photo, or reference image.
+              </p>
+            </div>
+            <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white">
+              <ImagePlus className="size-4" aria-hidden="true" />
+              {isUploadingSource ? "Uploading" : "Upload"}
+              <input
+                className="sr-only"
+                type="file"
+                accept="image/*"
+                disabled={isUploadingSource}
+                onChange={(event) => {
+                  void uploadSourceImage(event.currentTarget.files?.[0]);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+          </div>
+          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+            <div className="relative aspect-[16/10]">
+              {draftRecipe.sourceImageUrl ? (
+                <Image
+                  alt=""
+                  className="object-cover"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 560px"
+                  src={draftRecipe.sourceImageUrl}
+                />
+              ) : (
+                <div className="flex size-full items-center justify-center p-6 text-center text-sm font-semibold text-slate-400">
+                  No source image yet
+                </div>
+              )}
+            </div>
+          </div>
+          {sourceUploadError ? (
+            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+              {sourceUploadError}
+            </p>
+          ) : null}
+          <TextField
+            label="Image URL"
+            placeholder="https://..."
+            value={draftRecipe.sourceImageUrl ?? ""}
+            onChange={(value) => updateDraft({ sourceImageUrl: value })}
+          />
+        </div>
+
+        <div className="panel-surface grid gap-4 rounded-lg p-5">
+          <TextAreaField
+            label="Tags"
+            placeholder={"weeknight\nfish\nrice bowl"}
+            value={draftRecipe.tags.join("\n")}
+            onChange={(value) => updateDraft({ tags: linesToDraftList(value) })}
+          />
+          <TextAreaField
+            label="Ingredients"
+            placeholder={"2 salmon fillets\n2 tbsp white miso\nCooked rice"}
+            value={draftRecipe.ingredients.join("\n")}
+            onChange={(value) => updateDraft({ ingredients: linesToDraftList(value) })}
+            required
+          />
+          <TextAreaField
+            label="Steps"
+            placeholder={"Whisk the glaze.\nRoast for 12 minutes.\nServe over rice."}
+            value={draftRecipe.steps.join("\n")}
+            onChange={(value) => updateDraft({ steps: linesToDraftList(value) })}
+            required
+          />
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-3">
           <button
-            className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white"
+            className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
             type="button"
-            onClick={onLibrary}
+            onClick={onCancel}
           >
-            Save Draft
+            Cancel
+          </button>
+          <button
+            className="h-11 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            type="submit"
+            disabled={!canSave}
+          >
+            Save Recipe
           </button>
         </div>
-      </div>
-    </section>
+      </section>
+    </form>
   );
 }
 
@@ -1581,7 +1811,7 @@ function ImagePreview({
     setUploadError(null);
 
     try {
-      const imageUrl = await uploadCookedPhoto(file);
+      const imageUrl = await uploadCloudinaryImage(file, "cooked");
       onCookedPhotoAdded(imageUrl);
     } catch (error) {
       setUploadError(
@@ -1638,17 +1868,21 @@ function ImagePreview({
   );
 }
 
-async function uploadCookedPhoto(file: File) {
+async function uploadCloudinaryImage(
+  file: File,
+  purpose: CloudinaryUploadPurpose,
+) {
   const signatureResponse = await fetch("/api/cloudinary/signature", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ purpose }),
   });
   const signatureData = (await signatureResponse.json()) as {
     apiKey?: string;
     cloudName?: string;
     error?: string;
     folder?: string;
+    purpose?: CloudinaryUploadPurpose;
     signature?: string;
     timestamp?: number;
   };
@@ -1921,18 +2155,82 @@ function SelectField({
   );
 }
 
-function ImportButton({ icon, label }: { icon: ReactNode; label: string }) {
+function TextField({
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder?: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
-    <button
-      className="flex h-14 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 text-left text-sm font-semibold text-slate-700"
-      type="button"
-    >
-      <span className="flex size-9 items-center justify-center rounded-lg bg-white text-emerald-700">
-        {icon}
-      </span>
+    <label className="grid gap-1 text-xs font-semibold uppercase text-slate-500">
       {label}
-    </button>
+      <input
+        className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold normal-case text-slate-800 outline-none placeholder:text-slate-400"
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
   );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-xs font-semibold uppercase text-slate-500">
+      {label}
+      <input
+        className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold normal-case text-slate-800 outline-none"
+        min={0}
+        type="number"
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+    </label>
+  );
+}
+
+function TextAreaField({
+  label,
+  placeholder,
+  required = false,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder?: string;
+  required?: boolean;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-xs font-semibold uppercase text-slate-500">
+      {label}
+      <textarea
+        className="min-h-28 rounded-lg border border-slate-200 bg-white p-3 text-sm font-medium normal-case leading-6 text-slate-800 outline-none placeholder:text-slate-400"
+        placeholder={placeholder}
+        required={required}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function linesToDraftList(value: string) {
+  return value.split("\n");
 }
 
 function RecipeMeta({

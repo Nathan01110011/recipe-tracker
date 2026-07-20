@@ -16,16 +16,24 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const timestamp = Math.round(Date.now() / 1000);
+    const purpose = body.purpose === "source" ? "source" : "cooked";
+    const defaultFolder =
+      purpose === "source"
+        ? process.env.CLOUDINARY_SOURCE_UPLOAD_FOLDER || "recipe-tracker/source"
+        : process.env.CLOUDINARY_COOKED_UPLOAD_FOLDER ||
+          process.env.CLOUDINARY_UPLOAD_FOLDER ||
+          "recipe-tracker/cooked";
     const folder =
       typeof body.folder === "string" && body.folder.trim()
         ? body.folder.trim()
-        : process.env.CLOUDINARY_UPLOAD_FOLDER || "recipe-tracker/cooked";
+        : defaultFolder;
     const params = { folder, timestamp };
 
     return NextResponse.json({
       apiKey: requiredEnv("CLOUDINARY_API_KEY"),
       cloudName: requiredEnv("CLOUDINARY_CLOUD_NAME"),
       folder,
+      purpose,
       signature: signCloudinaryParams(params),
       timestamp,
     });
