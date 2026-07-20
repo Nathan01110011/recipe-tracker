@@ -89,13 +89,29 @@ The app code should convert `\\n` back to real newlines before authenticating.
 
 ## Vercel Env
 
-Add the same values in Vercel Project Settings > Environment Variables:
+Add the same Google Sheets values in Vercel Project Settings > Environment Variables:
 
 - `GOOGLE_SHEETS_SPREADSHEET_ID`
 - `GOOGLE_SHEETS_CLIENT_EMAIL`
 - `GOOGLE_SHEETS_PRIVATE_KEY`
 
 Add them for Production, Preview, and Development unless you intentionally want separate sheets per environment.
+
+For cooked photo uploads, add:
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+- `CLOUDINARY_UPLOAD_FOLDER`
+
+`CLOUDINARY_UPLOAD_FOLDER` can be `recipe-tracker/cooked`. Cloudinary folders are created by upload path, so you do not need to pre-create the folder.
+
+For a simple private deployment, add:
+
+- `APP_USERNAME`
+- `APP_PASSWORD`
+
+If those two values are blank, the app does not require a password.
 
 ## Security Notes
 

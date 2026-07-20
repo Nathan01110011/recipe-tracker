@@ -47,6 +47,8 @@ type Recipe = {
   ingredients: string[];
   steps: string[];
   notes: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type AppView = "home" | "library" | "cook" | "add";
@@ -84,6 +86,13 @@ function recipeRecordToRecipe(recipe: RecipeRecord): Recipe {
   };
 }
 
+function recipeToRecord(recipe: Recipe): RecipeRecord {
+  return {
+    ...recipe,
+    notes: recipe.notes || undefined,
+  };
+}
+
 const statusLabels: Record<ViewFilter, string> = {
   all: "All",
   todo: "To Do",
@@ -108,6 +117,8 @@ export default function Home() {
     {},
   );
   const [timers, setTimers] = useState<CookTimer[]>([]);
+  const [isLoadingRecipes, setIsLoadingRecipes] = useState(true);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const stagedRecipes = recipes.filter((recipe) => recipe.staged);
   const doneRecipes = recipes.filter((recipe) => recipe.status === "done");
@@ -148,6 +159,53 @@ export default function Home() {
   const cookRecipes = appView === "cook" ? stagedRecipes : visibleRecipes;
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadRecipes() {
+      try {
+        const response = await fetch("/api/recipes", { cache: "no-store" });
+        const data = (await response.json()) as {
+          recipes?: RecipeRecord[];
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(data.error ?? "Unable to load recipes.");
+        }
+
+        if (!cancelled && data.recipes?.length) {
+          const sheetRecipes = data.recipes.map(recipeRecordToRecipe);
+          setRecipes(sheetRecipes);
+          setActiveRecipeId((currentId) =>
+            sheetRecipes.some((recipe) => recipe.id === currentId)
+              ? currentId
+              : sheetRecipes[0].id,
+          );
+          setSyncMessage(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSyncMessage(
+            error instanceof Error
+              ? error.message
+              : "Using starter recipes because Sheets could not be reached.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingRecipes(false);
+        }
+      }
+    }
+
+    void loadRecipes();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const interval = window.setInterval(() => {
       setTimers((currentTimers) =>
         currentTimers.map((timer) =>
@@ -171,11 +229,56 @@ export default function Home() {
   }
 
   function updateRecipe(id: string, updates: Partial<Recipe>) {
+    const currentRecipe = recipes.find((recipe) => recipe.id === id);
+    const nextRecipe = currentRecipe
+      ? {
+          ...currentRecipe,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        }
+      : null;
+
     setRecipes((currentRecipes) =>
       currentRecipes.map((recipe) =>
-        recipe.id === id ? { ...recipe, ...updates } : recipe,
+        recipe.id === id && nextRecipe ? nextRecipe : recipe,
       ),
     );
+
+    if (nextRecipe) {
+      void persistRecipe(nextRecipe);
+    }
+  }
+
+  async function persistRecipe(recipe: Recipe) {
+    try {
+      const response = await fetch("/api/recipes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(recipeToRecord(recipe)),
+      });
+      const data = (await response.json()) as {
+        recipe?: RecipeRecord;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Unable to save recipe.");
+      }
+
+      setSyncMessage(null);
+      if (data.recipe) {
+        const savedRecipe = recipeRecordToRecipe(data.recipe);
+        setRecipes((currentRecipes) =>
+          currentRecipes.map((currentRecipe) =>
+            currentRecipe.id === savedRecipe.id ? savedRecipe : currentRecipe,
+          ),
+        );
+      }
+    } catch (error) {
+      setSyncMessage(
+        error instanceof Error ? error.message : "Recipe changes are not saved.",
+      );
+    }
   }
 
   function toggleIngredient(recipeId: string, ingredient: string) {
@@ -252,6 +355,7 @@ export default function Home() {
   }
 
   function addStarterRecipe() {
+    const now = new Date().toISOString();
     const newRecipe: Recipe = {
       id: `new-recipe-${Date.now()}`,
       title: "Untitled Recipe",
@@ -267,10 +371,13 @@ export default function Home() {
       ingredients: ["Add ingredients here"],
       steps: ["Add the cooking steps here"],
       notes: "Draft recipe ready to connect to the full editor.",
+      createdAt: now,
+      updatedAt: now,
     };
     setRecipes((currentRecipes) => [newRecipe, ...currentRecipes]);
     setActiveRecipeId(newRecipe.id);
     setAppView("add");
+    void persistRecipe(newRecipe);
   }
 
   return (
@@ -278,10 +385,17 @@ export default function Home() {
       <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
         <AppHeader
           appView={appView}
+          isLoadingRecipes={isLoadingRecipes}
           onAdd={addStarterRecipe}
           onHome={() => setAppView("home")}
           onLibrary={() => setAppView("library")}
         />
+
+        {syncMessage ? (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+            {syncMessage}
+          </div>
+        ) : null}
 
         {appView === "home" ? (
           <HomeScreen
@@ -367,11 +481,13 @@ export default function Home() {
 
 function AppHeader({
   appView,
+  isLoadingRecipes,
   onAdd,
   onHome,
   onLibrary,
 }: {
   appView: AppView;
+  isLoadingRecipes: boolean;
   onAdd: () => void;
   onHome: () => void;
   onLibrary: () => void;
@@ -385,7 +501,11 @@ function AppHeader({
         <span>
           <span className="block text-lg font-semibold leading-5 text-white">Recipe Collection</span>
           <span className="block text-sm font-medium text-slate-300">
-            {appView === "home" ? "Home" : statusForView(appView)}
+            {isLoadingRecipes
+              ? "Syncing"
+              : appView === "home"
+                ? "Home"
+                : statusForView(appView)}
           </span>
         </span>
       </button>
@@ -1319,7 +1439,14 @@ function RecipeOverview({
             ))}
           </div>
           <p className="mt-5 max-w-2xl text-sm leading-6 text-slate-600">{recipe.notes}</p>
-          <RecipeImages recipe={recipe} />
+          <RecipeImages
+            recipe={recipe}
+            onCookedPhotoAdded={(imageUrl) =>
+              onUpdateRecipe(recipe.id, {
+                cookedImageUrls: [imageUrl, ...recipe.cookedImageUrls],
+              })
+            }
+          />
         </section>
 
         <section className="grid content-start gap-3">
@@ -1338,7 +1465,13 @@ function RecipeOverview({
   );
 }
 
-function RecipeImages({ recipe }: { recipe: Recipe }) {
+function RecipeImages({
+  recipe,
+  onCookedPhotoAdded,
+}: {
+  recipe: Recipe;
+  onCookedPhotoAdded: (imageUrl: string) => void;
+}) {
   return (
     <div className="mt-6 grid gap-3 sm:grid-cols-2">
       <ImagePreview
@@ -1351,6 +1484,7 @@ function RecipeImages({ recipe }: { recipe: Recipe }) {
         src={recipe.cookedImageUrls[0]}
         emptyLabel="No cooked photos yet"
         count={recipe.cookedImageUrls.length}
+        onCookedPhotoAdded={onCookedPhotoAdded}
       />
     </div>
   );
@@ -1360,13 +1494,38 @@ function ImagePreview({
   count,
   emptyLabel,
   label,
+  onCookedPhotoAdded,
   src,
 }: {
   count?: number;
   emptyLabel: string;
   label: string;
+  onCookedPhotoAdded?: (imageUrl: string) => void;
   src?: string;
 }) {
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  async function handleUpload(file: File | undefined) {
+    if (!file || !onCookedPhotoAdded) {
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      const imageUrl = await uploadCookedPhoto(file);
+      onCookedPhotoAdded(imageUrl);
+    } catch (error) {
+      setUploadError(
+        error instanceof Error ? error.message : "Unable to upload photo.",
+      );
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
       <div className="relative aspect-[4/3] bg-slate-100">
@@ -1380,14 +1539,92 @@ function ImagePreview({
       </div>
       <div className="flex items-center justify-between gap-3 p-3">
         <span className="text-sm font-bold">{label}</span>
-        {count !== undefined ? (
-          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
-            {count}
-          </span>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {count !== undefined ? (
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
+              {count}
+            </span>
+          ) : null}
+          {onCookedPhotoAdded ? (
+            <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-slate-950 px-2.5 text-xs font-bold text-white">
+              <ImagePlus className="size-3.5" aria-hidden="true" />
+              {isUploading ? "Uploading" : "Add"}
+              <input
+                className="sr-only"
+                type="file"
+                accept="image/*"
+                disabled={isUploading}
+                onChange={(event) => {
+                  void handleUpload(event.currentTarget.files?.[0]);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+          ) : null}
+        </div>
       </div>
+      {uploadError ? (
+        <p className="border-t border-amber-100 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+          {uploadError}
+        </p>
+      ) : null}
     </div>
   );
+}
+
+async function uploadCookedPhoto(file: File) {
+  const signatureResponse = await fetch("/api/cloudinary/signature", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const signatureData = (await signatureResponse.json()) as {
+    apiKey?: string;
+    cloudName?: string;
+    error?: string;
+    folder?: string;
+    signature?: string;
+    timestamp?: number;
+  };
+
+  if (!signatureResponse.ok) {
+    throw new Error(signatureData.error ?? "Cloudinary is not configured.");
+  }
+
+  if (
+    !signatureData.apiKey ||
+    !signatureData.cloudName ||
+    !signatureData.folder ||
+    !signatureData.signature ||
+    !signatureData.timestamp
+  ) {
+    throw new Error("Cloudinary signature response is incomplete.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("api_key", signatureData.apiKey);
+  formData.append("timestamp", String(signatureData.timestamp));
+  formData.append("signature", signatureData.signature);
+  formData.append("folder", signatureData.folder);
+
+  const uploadResponse = await fetch(
+    `https://api.cloudinary.com/v1_1/${signatureData.cloudName}/image/upload`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+  const uploadData = (await uploadResponse.json()) as {
+    error?: { message?: string };
+    secure_url?: string;
+  };
+
+  if (!uploadResponse.ok || !uploadData.secure_url) {
+    throw new Error(uploadData.error?.message ?? "Photo upload failed.");
+  }
+
+  return uploadData.secure_url;
 }
 
 function getRecipeDisplayImage(recipe: Recipe) {
