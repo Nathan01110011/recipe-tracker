@@ -578,6 +578,7 @@ export default function Home() {
         {appView === "add" ? (
           <AddScreen
             draftRecipe={draftRecipe ?? createEmptyRecipe()}
+            isEditing={!!draftRecipe && recipes.some((item) => item.id === draftRecipe.id)}
             onBack={() => {
               setDraftRecipe(null);
               setAppView(draftRecipe && recipes.some((item) => item.id === draftRecipe.id) ? "library" : "home");
@@ -1093,6 +1094,7 @@ function CookScreen({
 }
 
 function AddScreen({
+  isEditing,
   onBack,
   onCancel,
   onDraftChange,
@@ -1100,6 +1102,7 @@ function AddScreen({
   draftRecipe,
 }: {
   draftRecipe: Recipe;
+  isEditing: boolean;
   onBack: () => void;
   onCancel: () => void;
   onDraftChange: (recipe: Recipe) => void;
@@ -1232,7 +1235,7 @@ function AddScreen({
           <p className="text-sm font-bold uppercase tracking-[0.16em] text-emerald-700">
             Manual entry
           </p>
-          <h1 className="mt-2 text-3xl font-semibold">Add Recipe</h1>
+          <h1 className="mt-2 text-3xl font-semibold">{isEditing ? "Edit Recipe" : "Add Recipe"}</h1>
         </div>
 
         <div className="grid gap-4">
@@ -1801,12 +1804,14 @@ function StepTimers({
 function RecipeOverview({
   recipe,
   onCook,
+  onEditRecipe,
   onDeleteRecipe,
   onUpdateRecipe,
 }: {
   recipe: Recipe;
   onCook: () => void;
   onDeleteRecipe: () => void;
+  onEditRecipe: () => void;
   onUpdateRecipe: (id: string, updates: Partial<Recipe>) => void;
 }) {
   return (
@@ -1849,6 +1854,7 @@ function RecipeOverview({
             compact
             recipe={recipe}
             onDeleteRecipe={onDeleteRecipe}
+            onEditRecipe={onEditRecipe}
             onUpdateRecipe={onUpdateRecipe}
           />
         </section>
