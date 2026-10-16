@@ -14,6 +14,7 @@ import {
   ImagePlus,
   ListChecks,
   Pause,
+  Pencil,
   Pin,
   Play,
   Plus,
@@ -111,9 +112,7 @@ function createEmptyRecipe(): Recipe {
 function recipeRecordToRecipe(recipe: RecipeRecord): Recipe {
   return {
     ...recipe,
-    sourceImageUrl:
-      recipe.sourceImageUrl ??
-      "https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=1200&q=80",
+    sourceImageUrl: recipe.sourceImageUrl || undefined,
     cookedImageUrls: recipe.cookedImageUrls ?? [],
     notes: recipe.notes ?? "",
   };
@@ -459,6 +458,14 @@ export default function Home() {
     setAppView("add");
   }
 
+  function editRecipe(recipeId: string) {
+    const existing = recipes.find((recipe) => recipe.id === recipeId);
+    if (!existing) return;
+    setDraftRecipe({ ...existing, tags: [...existing.tags], ingredients: [...existing.ingredients], steps: [...existing.steps] });
+    setActiveRecipeId(recipeId);
+    setAppView("add");
+  }
+
   function saveRecipeDraft(recipe: Recipe) {
     const now = new Date().toISOString();
     const newRecipe = normalizeRecipeForSave({
@@ -467,7 +474,9 @@ export default function Home() {
       updatedAt: now,
     });
 
-    setRecipes((currentRecipes) => [newRecipe, ...currentRecipes]);
+    setRecipes((currentRecipes) => currentRecipes.some((item) => item.id === newRecipe.id)
+      ? currentRecipes.map((item) => item.id === newRecipe.id ? newRecipe : item)
+      : [newRecipe, ...currentRecipes]);
     setActiveRecipeId(newRecipe.id);
     setDraftRecipe(null);
     setView("all");
@@ -534,6 +543,7 @@ export default function Home() {
             onViewChange={setView}
             onCook={() => setAppView("cook")}
             onDeleteRecipe={deleteRecipe}
+            onEditRecipe={editRecipe}
             onUpdateRecipe={updateRecipe}
           />
         ) : null}
@@ -560,6 +570,7 @@ export default function Home() {
             onToggleTimer={toggleTimer}
             onToggleTimerPinned={toggleTimerPinned}
             onDeleteRecipe={deleteRecipe}
+            onEditRecipe={editRecipe}
             onUpdateRecipe={updateRecipe}
           />
         ) : null}
@@ -567,9 +578,10 @@ export default function Home() {
         {appView === "add" ? (
           <AddScreen
             draftRecipe={draftRecipe ?? createEmptyRecipe()}
+            isEditing={!!draftRecipe && recipes.some((item) => item.id === draftRecipe.id)}
             onBack={() => {
               setDraftRecipe(null);
-              setAppView("home");
+              setAppView(draftRecipe && recipes.some((item) => item.id === draftRecipe.id) ? "library" : "home");
             }}
             onCancel={() => {
               setDraftRecipe(null);
@@ -785,6 +797,7 @@ function LibraryScreen({
   view,
   onCook,
   onDeleteRecipe,
+  onEditRecipe,
   onMealTypeChange,
   onOpenRecipe,
   onQueryChange,
@@ -800,6 +813,7 @@ function LibraryScreen({
   view: ViewFilter;
   onCook: () => void;
   onDeleteRecipe: (recipeId: string) => void;
+  onEditRecipe: (recipeId: string) => void;
   onMealTypeChange: (value: "All" | MealType) => void;
   onOpenRecipe: (recipeId: string) => void;
   onQueryChange: (value: string) => void;
@@ -868,6 +882,7 @@ function LibraryScreen({
         recipe={activeRecipe}
         onCook={onCook}
         onDeleteRecipe={() => onDeleteRecipe(activeRecipe.id)}
+        onEditRecipe={() => onEditRecipe(activeRecipe.id)}
         onUpdateRecipe={onUpdateRecipe}
       />
     </section>
@@ -893,6 +908,7 @@ function CookScreen({
   onToggleTimer,
   onToggleTimerPinned,
   onDeleteRecipe,
+  onEditRecipe,
   onUpdateRecipe,
 }: {
   activeRecipe: Recipe;
@@ -917,6 +933,7 @@ function CookScreen({
   onToggleTimer: (timerId: string) => void;
   onToggleTimerPinned: (timerId: string) => void;
   onDeleteRecipe: (recipeId: string) => void;
+  onEditRecipe: (recipeId: string) => void;
   onUpdateRecipe: (id: string, updates: Partial<Recipe>) => void;
 }) {
   const totalSteps = activeRecipe.steps.length;
@@ -1026,6 +1043,7 @@ function CookScreen({
                 compact
                 recipe={activeRecipe}
                 onDeleteRecipe={() => onDeleteRecipe(activeRecipe.id)}
+                onEditRecipe={() => onEditRecipe(activeRecipe.id)}
                 onUpdateRecipe={onUpdateRecipe}
               />
             </div>
@@ -1076,6 +1094,7 @@ function CookScreen({
 }
 
 function AddScreen({
+  isEditing,
   onBack,
   onCancel,
   onDraftChange,
@@ -1083,6 +1102,7 @@ function AddScreen({
   draftRecipe,
 }: {
   draftRecipe: Recipe;
+  isEditing: boolean;
   onBack: () => void;
   onCancel: () => void;
   onDraftChange: (recipe: Recipe) => void;
@@ -1215,7 +1235,7 @@ function AddScreen({
           <p className="text-sm font-bold uppercase tracking-[0.16em] text-emerald-700">
             Manual entry
           </p>
-          <h1 className="mt-2 text-3xl font-semibold">Add Recipe</h1>
+          <h1 className="mt-2 text-3xl font-semibold">{isEditing ? "Edit Recipe" : "Add Recipe"}</h1>
         </div>
 
         <div className="grid gap-4">
@@ -1334,6 +1354,7 @@ function AddScreen({
               {sourceUploadError}
             </p>
           ) : null}
+          {draftRecipe.sourceImageUrl ? <button className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700" type="button" onClick={() => updateDraft({ sourceImageUrl: undefined })}>Remove source image</button> : null}
           <TextField
             label="Image URL"
             placeholder="https://..."
@@ -1783,12 +1804,14 @@ function StepTimers({
 function RecipeOverview({
   recipe,
   onCook,
+  onEditRecipe,
   onDeleteRecipe,
   onUpdateRecipe,
 }: {
   recipe: Recipe;
   onCook: () => void;
   onDeleteRecipe: () => void;
+  onEditRecipe: () => void;
   onUpdateRecipe: (id: string, updates: Partial<Recipe>) => void;
 }) {
   return (
@@ -1831,6 +1854,7 @@ function RecipeOverview({
             compact
             recipe={recipe}
             onDeleteRecipe={onDeleteRecipe}
+            onEditRecipe={onEditRecipe}
             onUpdateRecipe={onUpdateRecipe}
           />
         </section>
@@ -2015,12 +2039,14 @@ function getRecipeDisplayImage(recipe: Recipe) {
 
 function CookControls({
   compact = false,
+  onEditRecipe,
   onDeleteRecipe,
   recipe,
   onUpdateRecipe,
 }: {
   compact?: boolean;
   onDeleteRecipe?: () => void;
+  onEditRecipe?: () => void;
   recipe: Recipe;
   onUpdateRecipe: (id: string, updates: Partial<Recipe>) => void;
 }) {
@@ -2087,6 +2113,11 @@ function CookControls({
           <ExternalLink className="size-4" aria-hidden="true" />
           Source
         </a>
+      ) : null}
+      {onEditRecipe ? (
+        <button className="flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800" type="button" onClick={onEditRecipe}>
+          <Pencil className="size-4" aria-hidden="true" /> Edit Recipe
+        </button>
       ) : null}
       {onDeleteRecipe ? (
         <button
